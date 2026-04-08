@@ -1,5 +1,23 @@
+mona:
+  enabled: True              # 모드 ON → 연결되면 모나로 명령 전송, 아니면 시뮬레이터로 폴백
+  udp_port: 9999
+  distance_scale: 1.0
+  robots:
+  - agent_id: 0
+    host: 192.168.0.27   # MONA #1 IP
+    port: 8080           # MONA #1 포트
+  - agent_id: 1
+    host: 192.168.0.26   # MONA #2 IP
+    port: 8080           # MONA #2 포트
+  - agent_id: 2
+    host: 192.168.0.24   # MONA #3 IP
+    port: 8080           # MONA #3 포트
+  - agent_id: 3
+    host: 192.168.0.28   # MONA #4 IP
+    port: 8080           # MONA #4 포트
+
 scenario: 
-  environment: scenarios.simple
+  environment: scenarios.features.mona.offboard
 
 # decision_making: # Case 1
 #   plugin: plugins.grape.grape.GRAPE
@@ -16,6 +34,7 @@ decision_making: # Case 2
     task_reward_discount_factor: 0.999 
     winning_bid_cancel: True
     acceptable_empty_bundle_duration: 500 # sec
+    enable_global_convergence: False # True: 통신 범위 내 모든 이웃이 수렴해야 이동, False: 자신만 수렴하면 이동
 
 # decision_making: # Case 3
 #   plugin: plugins.greedy.greedy.FirstClaimGreedy
@@ -27,24 +46,35 @@ decision_making: # Case 2
 
 agents:
   behavior_tree_xml: default_bt.xml 
-  quantity: 8
+  quantity: 4
+  fixed_positions:
+    - [40, 40]      # agent 0
+    - [40, 700]     # agent 1
+    - [1300, 700]   # agent 2
+    - [1300, 40]    # agent 3
+  fixed_angles:     # Initial heading in radians (optional, defaults to 0)
+    - 0.78539816           # agent 0 45  degree
+    - 5.49778714           # agent 1 315 degree
+    - 3.92699082           # agent 2 225 degree
+    - 2.35619449           # agent 3 135 degree
   locations:
     x_min: 0
     x_max: 1340
     y_min: 0
     y_max: 740
     non_overlap_radius: 0 
-  max_speed: 0  
-  max_accel: 0
-  max_angular_speed: 0
+  max_speed: 0.9  
+  max_accel: 1.0
+  max_angular_speed: 0.03
   target_approaching_radius: 50
-  work_rate: 1  # work rate for each agent (per 1.0/simulation.sampling_freq)
-  communication_radius: 600 # 0 represents "global", meaning that each agent can access to the information of all the other agents
+  work_rate: 10  # work rate for each agent (per 1.0/simulation.sampling_freq)
+  communication_radius: 2000 # 0 represents "global", meaning that each agent can access to the information of all the other agents
   situation_awareness_radius: 2000 # 0 represents "global", meaning that each agent can access to the information of all the tasks
   random_exploration_duration: 1000.0 # sec
+  use_rotation_shim: True  # True: rotate-then-move (Phase 1: rotate in place, Phase 2: move straight); False: standard steering
 
 tasks:
-  quantity: 40
+  quantity: 50
   locations:
     x_min: 40
     x_max: 1300
@@ -58,17 +88,17 @@ tasks:
   dynamic_task_generation:
     enabled: False
     interval_seconds: 2000
-    max_generations: 3
+    max_generations: 1
     tasks_per_generation: 25
 
 simulation:
   random_seed: 1  # Random seed (integer ≥ 1), or None to disable seeding
-  sampling_freq: 1.0 
+  sampling_freq: 10.0 
   speed_up_factor: 0 # 0 mean max booster; 1 means normal; 10 means 10-times faster
   max_simulation_time: 0 # 0 means no limit
   agent_track_size: 400  
-  screen_width: 1400 
-  screen_height: 1000 
+  screen_width: 1340 
+  screen_height: 740 
   gif_recording_fps: 0.05  
   task_visualisation_factor: 3  # visualization factor for tasks : 10 means converting 10 amount to 1 pixel
   profiling_mode: False

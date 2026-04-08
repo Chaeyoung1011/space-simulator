@@ -8,7 +8,7 @@ from modules.utils import set_config
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='SPACE (Swarm Planning And Control Evaluation) Simulator')
-parser.add_argument('--config', type=str, default='scenarios/simple/configs/grape.yaml', help='Path to the configuration file (default: --config=config.yaml)')
+parser.add_argument('--config', type=str, default='scenarios/features/mona/p2p/configs/p2p.yaml', help='Path to the configuration file (default: --config=config.yaml)')
 args = parser.parse_args()
 
 # Load configuration and initialize the environment
@@ -36,6 +36,7 @@ async def game_loop():
             # Record data if time recording mode is enabled
             if sim.save_timewise_result_csv:
                 sim.record_timewise_result()
+                sim.record_convergence_result()
 
         sim.render()
         sim.update_display()

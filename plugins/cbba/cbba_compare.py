@@ -4,6 +4,7 @@ from modules.utils import config
 from enum import Enum
 import numpy as np
 import copy
+import time
 from modules.utils import merge_dicts
 
 KEEP_MOVING_DURING_CONVERGENCE = config['decision_making']['CBBA'].get('execute_movements_during_convergence', False)
@@ -11,7 +12,6 @@ MAX_TASKS_PER_AGENT = config['decision_making']['CBBA']['max_tasks_per_agent']
 LAMBDA = config['decision_making']['CBBA']['task_reward_discount_factor']
 WINNING_BID_CANCEL = config['decision_making']['CBBA']['winning_bid_cancel']
 NO_BUNDLE_DURATION = config['decision_making']['CBBA']['acceptable_empty_bundle_duration']
-ENABLE_GLOBAL_CONVERGENCE = config['decision_making']['CBBA'].get('enable_global_convergence', False)
 
 class Phase(Enum):
     BUILD_BUNDLE = 1
@@ -34,14 +34,12 @@ class CBBA:
             'assigned_task_id': None,
             'winning_agents': self.z, 
             'winning_bids': self.y,
-            'message_received_time_stamp': self.s,
-            'is_converged': False
+            'message_received_time_stamp': self.s
             } 
         
         
         self.assigned_task = None
         self.no_bundle_duration = 0
-        self.is_locally_converged = False
         self._tick_counter = 0
         
         # self.planned_tasks = [] # For visualisation
@@ -70,9 +68,6 @@ class CBBA:
 
         # Give up the decision-making process if there is no task nearby 
         if len(local_tasks_info) == 0 and len(self.bundle) == 0: 
-            # 할당 가능한 task가 없으므로 수렴 완료로 간주 → 이웃 agent들을 막지 않도록
-            self.is_locally_converged = True
-            self.agent.message_to_share['is_converged'] = True
             return None
         
         # Neutralize all the winning bid information if there are local tasks nearby but the agent cannot choose any of them for a certain period
@@ -92,36 +87,23 @@ class CBBA:
         if self.phase == Phase.BUILD_BUNDLE:
             # Phase 1 Build Bundle 
             self.build_bundle(local_tasks_info)            
-
-            # task가 보이지만 낙찰받지 못해 bundle이 비어있으면 수렴 완료로 간주
-            if len(self.bundle) == 0:
-                self.is_locally_converged = True
-                self.agent.message_to_share['is_converged'] = True
-                return None
-            
-            self.is_locally_converged = False
-
             # Broadcasting
             self.agent.message_to_share = { 
                 'agent_id': self.agent.agent_id,
                 'assigned_task_id': self.assigned_task.task_id if self.assigned_task is not None else None,                     
                 'winning_agents': copy.deepcopy(self.z), 
                 'winning_bids': copy.deepcopy(self.y),
-                'message_received_time_stamp': copy.deepcopy(self.s),
-                'is_converged': False
+                'message_received_time_stamp': copy.deepcopy(self.s)
                 } 
             
             self.phase = Phase.ASSIGNMENT_CONSENSUS
             self.agent.set_planned_tasks(self.path) # For visualisation (SPACE only)
             self.assigned_task = None   # 아직 consensus 안된거니까 None 이라고 해줘야함
+            self._tick_counter = 0
             return None
         
         if self.phase == Phase.ASSIGNMENT_CONSENSUS:
             # self.update_time_stamp() # NOTE: Moved after conflict resolution. s_i must reflect prior knowledge during Table I comparisons (s_km > s_im), otherwise merging s_k beforehand makes the comparison always false.
-
-            self.agent.message_to_share['winning_agents'] = copy.deepcopy(self.z)
-            self.agent.message_to_share['winning_bids'] = copy.deepcopy(self.y)
-
             # Phase 2 Consensus
             candidates = list(local_tasks_info.values()) if isinstance(local_tasks_info, dict) else local_tasks_info            
             
@@ -272,29 +254,19 @@ class CBBA:
                 if len(updated_bundle) > 0:
                     self.no_bundle_duration = 0
 
-            locally_converged = (updated_bundle == self.bundle) and self._has_no_conflicts()
+            if updated_bundle == self.bundle: # NOTE: 원래 모든 agents가 다 converge할 때까지 기다려야하는데, 분산화 현실성상 진행
+                # Converged!
 
-            if locally_converged:
-                # Local Convergence: bundle 불변 + 이웃과 낙찰 결과 일치
-                self.is_locally_converged = True
-                self.agent.message_to_share['is_converged'] = True
-
+                # _next_assigned_task = next((task for task in self.agent.assigned_tasks if task.completed is False), None)
                 self.assigned_task = self.path[0] if self.path else None
                 self.agent.message_to_share['assigned_task_id'] = self.assigned_task.task_id if self.assigned_task is not None else None # For Rviz visualisation                  
                 self.agent.message_to_share['planned_tasks_id'] = [task.task_id for task in self.path] # For Rviz visualisation
-
-                # Global convergence: 모든 이웃이 is_converged=True일 때만 이동
-                if ENABLE_GLOBAL_CONVERGENCE and not self._is_globally_converged():
-                    return None
-
                 return self.assigned_task.task_id if self.assigned_task is not None else None
 
             else:
-                self.is_locally_converged = False
-                self.agent.message_to_share['is_converged'] = False
                 self.bundle = updated_bundle
                 self.path = updated_path
-                self.agent.set_planned_tasks(self.path) # For visualisation
+                self.agent.set_planned_tasks(self.path) # For visualisation (SPACE only)
                 self.assigned_task = None # NOTE: 불만족 상황이 되었으니 assigned_task 초기화
                 self.phase = Phase.BUILD_BUNDLE
         
@@ -305,35 +277,6 @@ class CBBA:
         else:
             # self.agent.reset_movement()  # Neutralise the agent's current movement during converging to a consensus
             return None
-        
-    def _has_no_conflicts(self):
-        """
-        내 bundle에서 내가 낙찰받은 task에 대해
-        직접 통신 가능한 이웃 agent가 동일 task를 자신이 낙찰받았다고 주장하는 경우만 충돌로 판단.
-        (communication_radius 기준: 실제로 메시지를 교환하는 이웃만 체크)
-        """
-        neighbors = self.agent.agents_nearby
-        for task_id in self.bundle:
-            if self.z.get(task_id) != self.agent.agent_id:
-                continue  # 내가 낙찰받지 않은 task는 충돌 체크 불필요
-            for neighbor in neighbors:
-                neighbor_z = neighbor.message_to_share.get('winning_agents', {})
-                if neighbor_z.get(task_id) == neighbor.agent_id:
-                    # 나도 내가 이겼고, 이웃도 자신이 이겼다 → 진짜 충돌
-                    return False
-        return True
-
-    def _is_globally_converged(self):
-        """
-        직접 통신 가능한 이웃 agent의 is_converged가 True인지 확인.
-        이웃이 없으면 True 반환 (자신만 있는 경우).
-        (communication_radius 기준: 실제로 메시지를 교환하는 이웃만 체크)
-        """
-        neighbors = self.agent.agents_nearby
-        for neighbor in neighbors:
-            if not neighbor.message_to_share.get('is_converged', False):
-                return False
-        return True
     
     def _update(self, task_id, y_k, z_k):
         self.y[task_id] = y_k[task_id]   # Winning bid update
@@ -503,4 +446,3 @@ class CBBA:
             current_position = next_position
 
         return expected_reward_from_task
-

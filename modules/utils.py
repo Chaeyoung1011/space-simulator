@@ -5,6 +5,8 @@ import imageio
 import datetime
 from PIL import Image
 import os
+import matplotlib
+matplotlib.use('Agg')  # X display 없이 파일 저장 전용 백엔드
 import matplotlib.cm as cm
 import shutil
 import pandas as pd
@@ -166,6 +168,7 @@ class ResultSaver:
         self.result_file_path = self.generate_output_filename()
         self.timewise_result_file_path = self.generate_output_filename(additional_keyword="timewise")
         self.agentwise_result_file_path = self.generate_output_filename(additional_keyword="agentwise")
+        self.convergence_result_file_path = self.generate_output_filename(additional_keyword="convergence")
         self.df_timewise_result = None
         self.df_agentwise_result = None
 
@@ -241,6 +244,8 @@ class ResultSaver:
         elif type == "timewise":
             csv_file_path = self.change_file_extension(self.timewise_result_file_path, "csv")
             self.df_agentwise_result = df
+        elif type == "convergence":
+            csv_file_path = self.change_file_extension(self.convergence_result_file_path, "csv")
         else:
             csv_file_path = self.change_file_extension(self.result_file_path, "csv")
         
