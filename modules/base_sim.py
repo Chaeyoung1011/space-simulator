@@ -172,6 +172,57 @@ class BaseSim:
             task.draw(self.screen)
 
 
+    def draw_status_overlay(self):
+        task_time_text = pre_render_text(f'Time: {self.simulation_time:.2f}s', 36, (0, 0, 0))
+        self.screen.blit(task_time_text, (self.screen_width - 230, 20))
+
+    def draw_battery_overlay(self):
+        """Draw a small vertical battery bar to the left of each agent (HP-bar style)."""
+        if not self.agents:
+            return
+
+        BAR_W        = 5    # thin bar
+        BAR_H        = 35   # slightly taller
+        GAP          = 6    # gap between agent circle edge and bar
+        AGENT_RADIUS = 40   # matches agent draw circle radius
+
+        if not hasattr(self, '_battery_font') or self._battery_font is None:
+            self._battery_font = pygame.font.SysFont(None, 14)
+
+        for agent in self.agents:
+            battery = getattr(agent, 'battery', None)
+            if battery is None:
+                continue
+
+            bar_x = int(agent.position.x) - AGENT_RADIUS - GAP - BAR_W
+            bar_y = int(agent.position.y) - BAR_H // 2
+
+            # Background
+            bg_rect = pygame.Rect(bar_x, bar_y, BAR_W, BAR_H)
+            pygame.draw.rect(self.screen, (190, 190, 190), bg_rect)
+
+            # Fill (bottom-up)
+            ratio  = max(0.0, min(1.0, battery / 100.0))
+            fill_h = int(BAR_H * ratio)
+            fill_y = bar_y + (BAR_H - fill_h)
+            if ratio > 0.5:
+                bar_color = (50, 200, 50)    # green
+            elif ratio > 0.2:
+                bar_color = (230, 180, 0)    # yellow
+            else:
+                bar_color = (220, 50, 50)    # red
+            if fill_h > 0:
+                pygame.draw.rect(self.screen, bar_color,
+                                 pygame.Rect(bar_x, fill_y, BAR_W, fill_h))
+
+            # Border
+            pygame.draw.rect(self.screen, (80, 80, 80), bg_rect, 1)
+
+            # Percentage label above the bar
+            pct_surf = self._battery_font.render(f'{int(battery)}%', True, (30, 30, 30))
+            pct_rect = pct_surf.get_rect(centerx=bar_x + BAR_W // 2, bottom=bar_y - 2)
+            self.screen.blit(pct_surf, pct_rect)
+
     def render(self):
         if self.rendering_mode == "Screen" and self.screen:
             # Draw background
@@ -185,11 +236,12 @@ class BaseSim:
             self.draw_agents_info()
             self.draw_agents()
 
-            # Display task quantity and elapsed simulation time                
-            task_time_text = pre_render_text(f'Tasks left: {self.tasks_left}; Simulation Time: {self.simulation_time:.2f}s', 36, (0, 0, 0))
-            self.screen.blit(task_time_text, (self.screen_width - 450, 20))
+            # Display wall clock
             wall_clock_text = pre_render_text(f'Wall Clock: {self.wall_clock_elapsed:.2f}s', 36, (0, 0, 0))
-            self.screen.blit(wall_clock_text, (self.screen_width - 205, 60))
+            self.screen.blit(wall_clock_text, (self.screen_width - 230, 20))
+
+            # Draw per-agent battery bars (top-left)
+            self.draw_battery_overlay()
 
 
             # # Call draw_decision_making_status from the imported module if it exists
@@ -227,8 +279,8 @@ class BaseSim:
             self.clock.tick(self.sampling_freq*self.speed_up_factor)
 
     def close(self):
-        pygame.quit()
         self.save_results()
+        pygame.quit()
 
     def save_results():
         # Define it at your scenario-specific `env.py`
