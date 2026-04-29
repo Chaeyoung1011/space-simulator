@@ -26,6 +26,20 @@ class GRAPE:
             'time_stamp': self.time_stamp
             } 
 
+    def reset(self):
+        """Reset all state for a new generation."""
+        self.satisfied = False
+        self.evolution_number = 0
+        self.time_stamp = 0
+        self.partition = {}
+        self.assigned_task = None
+        self.current_utilities = {}
+        self.agent.message_to_share = {
+            'agent_id': self.agent.agent_id,
+            'partition': self.partition, 
+            'evolution_number': self.evolution_number,
+            'time_stamp': self.time_stamp
+            } 
 
     def initialize_partition_by_distance(self, agents_info, tasks_info, partition):
         for agent in agents_info:
