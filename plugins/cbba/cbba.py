@@ -346,6 +346,8 @@ class CBBA:
         max_timestamp = {}     
         for other_agent_message in self.agent.messages_received:
             time_stamp = other_agent_message.get("message_received_time_stamp")
+            if time_stamp is None:
+                continue
             max_timestamp = merge_dicts(max_timestamp, time_stamp)
 
         # Finally merge
