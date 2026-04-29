@@ -133,8 +133,27 @@ class GRAPE:
         if self.agent.agent_id not in self.partition[task.task_id]:
             num_collaborator += 1
 
+        # Battery stats across all agents.
+        # battery may be None (real robot not yet received) → treat as 100% fallback.
+        my_battery = getattr(self.agent, 'battery', None) or 100.0
+        all_agents = getattr(self.agent, 'agents_info', None) or [self.agent]
+        known_batteries = [b for b in (getattr(a, 'battery', None) for a in all_agents) if b is not None]
+        max_battery = max(known_batteries) if known_batteries else 100.0
+        min_battery = min(known_batteries) if known_batteries else 0.0
+        sorted_batteries = sorted(known_batteries)
+        n = len(sorted_batteries)
+        if n % 2 == 1:
+            median_battery = sorted_batteries[n // 2]
+        else:
+            median_battery = (sorted_batteries[n // 2 - 1] + sorted_batteries[n // 2]) / 2.0
+        battery_range = max_battery - min_battery
+        battery_ratio = ((my_battery - min_battery) / battery_range) if battery_range > 0.0 else 1.0
+        urgency_factor = (max_battery / median_battery) if median_battery > 0.0 else 1.0
+
         distance = (self.agent.position - task.position).length()              
-        utility = task.amount / (num_collaborator) - COST_WEIGHT_FACTOR * distance * (num_collaborator ** SOCIAL_INHIBITION_FACTOR) 
+        utility = urgency_factor * battery_ratio * task.amount / (num_collaborator) - COST_WEIGHT_FACTOR * distance * (num_collaborator ** SOCIAL_INHIBITION_FACTOR)
+        # utility = battery_ratio * task.amount / (num_collaborator) - COST_WEIGHT_FACTOR * distance * (num_collaborator ** SOCIAL_INHIBITION_FACTOR)
+        # utility = task.amount / (num_collaborator) - COST_WEIGHT_FACTOR * distance * (num_collaborator ** SOCIAL_INHIBITION_FACTOR)
         return utility
 
     def distributed_mutex(self, messages_received):        
