@@ -1,3 +1,4 @@
+import random
 import pygame
 import math
 import os
@@ -5,7 +6,7 @@ import time
 from modules.utils import config
 from modules.base_agent import BaseAgent
 from scenarios.features.mona.puppet.sim.task import task_colors
-from scenarios.features.mona.puppet.sim.mona_client import MonaClient
+from scenarios.features.mona.puppet.sim.mona_client import MonaClient, BatteryReceiver
 
 # Load agent configuration (Scenario Specific)
 work_rate = config['agents']['work_rate']
@@ -14,18 +15,32 @@ work_rate = config['agents']['work_rate']
 behavior_tree_xml = f"{os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}/{config['agents']['behavior_tree_xml']}"
 
 class Agent(BaseAgent):
-    def __init__(self, agent_id, position, tasks_info):
-        super().__init__(agent_id, position, tasks_info)
+    def __init__(self, agent_id, position, tasks_info, rotation=0, seed=None, initial_battery=None):
+        super().__init__(agent_id, position, tasks_info, rotation)
         self.work_rate = work_rate
 
-        
-        self.task_amount_done = 0.0        
+
+        self.task_amount_done = 0.0
 
         self._mona = None
         self.is_real_robot = False
         self._position_initialized = False  # 추가
         self._last_update_time = time.time()
         self._init_robot_connection()
+
+        # Battery: use fixed value if provided, otherwise random 40~90%.
+        # Real robot → tracks delta from first UDP value and applies it to sim initial value.
+        # e.g. sim_init=64.87, first_udp=41%, later_udp=40% → battery=63.87%
+        if initial_battery is not None:
+            self.battery = float(initial_battery)
+        else:
+            rng = random.Random(seed) if seed is not None else random
+            self.battery = rng.uniform(40.0, 90.0)
+        self._sim_initial_battery = self.battery  # sim 초기값 고정 보존
+        self._real_battery_base = None            # 첫 UDP 수신값 (baseline)
+        self._max_real_drop = 0.0                 # 누적 최대 낙하량 (monotonic 보장)
+        if self.is_real_robot:
+            self._battery_receiver = BatteryReceiver.get_instance(config)
 
     def _init_robot_connection(self):
         """Initialize connection to real robot if configured."""
@@ -99,7 +114,20 @@ class Agent(BaseAgent):
         - Real robot mode: BT handles all commands (including STOP via Idle node)
         - Simulation mode: BaseAgent handles physics
         """
-        if not self._is_robot_connected():
+        if self._is_robot_connected():
+            # Track real robot battery delta and apply it to the sim initial value.
+            # - First packet sets the baseline (real robot's battery at experiment start).
+            # - Subsequent packets: drop = baseline - received (how much real battery fell).
+            # - self.battery = sim_initial - max_drop (monotonically decreasing).
+            # e.g. sim_init=64.87, baseline=41%, received=40% → drop=1% → battery=63.87%
+            received = self._battery_receiver.get_battery(self.agent_id)
+            if received is not None:
+                if self._real_battery_base is None:
+                    self._real_battery_base = received  # 첫 수신값을 baseline으로 고정
+                drop = self._real_battery_base - received
+                self._max_real_drop = max(self._max_real_drop, drop)  # 노이즈 스파이크 방지
+                self.battery = max(0.0, self._sim_initial_battery - self._max_real_drop)
+        else:
             super().update()
 
     def _send_move_command(self, target):
@@ -137,7 +165,11 @@ class Agent(BaseAgent):
         self.update_color()
         pygame.draw.polygon(screen, self.color, [p1, p2, p3])
 
-    def update_color(self):        
-        self.color = task_colors.get(self.assigned_task_id, (20, 20, 20))  # Default to Dark Grey if no task is assigned
-
+    def update_color(self):
+        _ST_COLORS = {
+            0: (30, 100, 220),   # Super Task 0 → blue
+            1: (220, 50, 50),    # Super Task 1 → red
+        }
+        st_id = getattr(self, 'assigned_super_task_id', None)
+        self.color = _ST_COLORS.get(st_id, (20, 20, 20))  # unassigned → dark grey
 

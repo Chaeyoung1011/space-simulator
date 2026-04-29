@@ -8,9 +8,85 @@ Protocol:
     - "G <angle_deg> <distance_mm>\\n" : Move command
     - "STOP\\n" : Stop command
 """
+import json
 import socket
 import math
+import threading
 from typing import Tuple, Optional
+
+
+class BatteryReceiver:
+    """Singleton UDP listener that receives battery data from all MONA robots.
+
+    Arduino sends: {"battery": 85.2, "pulses": 12345}  →  port 5005
+    Source IP identifies which robot sent the packet.
+    """
+
+    _instance = None
+    _lock = threading.Lock()
+
+    def __init__(self, listen_port: int, ip_to_agent_id: dict):
+        self._ip_to_agent_id = ip_to_agent_id   # {robot_ip: agent_id}
+        self._battery_data: dict = {}            # {agent_id: battery%}
+        self._data_lock = threading.Lock()
+
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._sock.bind(('', listen_port))
+        self._sock.settimeout(0.5)
+
+        self._running = True
+        self._thread = threading.Thread(target=self._recv_loop, daemon=True)
+        self._thread.start()
+        print(f"[BatteryReceiver] Listening on UDP port {listen_port}")
+
+    # ── Public API ──────────────────────────────────────────────
+
+    def get_battery(self, agent_id: int) -> Optional[float]:
+        """Return latest battery % for agent_id, or None if not yet received."""
+        with self._data_lock:
+            return self._battery_data.get(agent_id, None)
+
+    def close(self):
+        self._running = False
+        try:
+            self._sock.close()
+        except Exception:
+            pass
+
+    # ── Background recv loop ─────────────────────────────────────
+
+    def _recv_loop(self):
+        while self._running:
+            try:
+                data, addr = self._sock.recvfrom(256)
+                ip = addr[0]
+                payload = json.loads(data.decode('utf-8'))
+                batt = float(payload['battery'])
+                agent_id = self._ip_to_agent_id.get(ip)
+                if agent_id is not None:
+                    with self._data_lock:
+                        self._battery_data[agent_id] = batt
+            except socket.timeout:
+                pass
+            except (json.JSONDecodeError, KeyError, ValueError):
+                pass
+
+    # ── Factory ─────────────────────────────────────────────────
+
+    @classmethod
+    def get_instance(cls, config: dict) -> 'BatteryReceiver':
+        """Return the shared singleton, creating it on first call."""
+        with cls._lock:
+            if cls._instance is None:
+                mona_cfg = config.get('mona', {})
+                listen_port = int(mona_cfg.get('battery_listen_port', 5005))
+                ip_to_agent_id = {
+                    robot['host']: int(robot['agent_id'])
+                    for robot in mona_cfg.get('robots', [])
+                }
+                cls._instance = cls(listen_port, ip_to_agent_id)
+            return cls._instance
 
 
 class MonaClient:
@@ -65,7 +141,6 @@ class MonaClient:
     def send_stop(self) -> None:
         """Send stop command to robot."""
         self._send_packet(b"STOP\n")
-        print(f"[UDP->{self.host}:{self.port}] STOP")
 
     def close(self) -> None:
         """Close the UDP socket."""
@@ -111,7 +186,7 @@ class MonaClient:
         """Send formatted G command."""
         payload = f"G {angle_deg:.2f} {distance_mm:.1f}\n"
         self._send_packet(payload.encode())
-        print(f"[UDP->{self.host}:{self.port}] {payload.strip()}")
+        # print(f"[UDP->{self.host}:{self.port}] {payload.strip()}")
 
     def _send_packet(self, data: bytes) -> None:
         """Send raw UDP packet."""

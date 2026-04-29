@@ -9,11 +9,15 @@ task_colors = generate_task_colors(config['tasks']['quantity'] + tasks_per_gener
 
 from modules.base_task import BaseTask
 
+_fixed_amounts = config['tasks'].get('fixed_amounts', [])
 
 class Task(BaseTask):
     def __init__(self, task_id, position):
         super().__init__(task_id, position)
-        self.amount = random.uniform(config['tasks']['amounts']['min'], config['tasks']['amounts']['max'])        
+        if task_id < len(_fixed_amounts):
+            self.amount = float(_fixed_amounts[task_id])
+        else:
+            self.amount = random.uniform(config['tasks']['amounts']['min'], config['tasks']['amounts']['max'])
         self.radius = self.amount / config['simulation']['task_visualisation_factor']
         self.color = task_colors.get(self.task_id, (0, 0, 0))  # Default to black if task_id not found
 
@@ -21,7 +25,14 @@ class Task(BaseTask):
     def draw(self, screen):
         self.radius = self.amount / config['simulation']['task_visualisation_factor']        
         if not self.completed:
-            pygame.draw.circle(screen, self.color, self.position, int(self.radius))
+            r = max(int(self.radius), 10)   # minimum 10 px for visibility
+            x, y = int(self.position[0]), int(self.position[1])
+            shape = getattr(self, 'draw_shape', 'circle')
+            if shape == 'square':
+                pygame.draw.rect(screen, self.color,
+                                 pygame.Rect(x - r, y - r, r * 2, r * 2))
+            else:
+                pygame.draw.circle(screen, self.color, (x, y), r)
 
     def draw_task_id(self, screen):
         if not self.completed:
