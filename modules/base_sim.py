@@ -97,6 +97,7 @@ class BaseSim:
         # Recording variables
         self.recording = False
         self.frames = []    
+        self.dragging_target = None  # Can be an agent or a task
         if self.save_gif and self.rendering_mode == "Screen":
             self.recording = True
             self.frames = [] # Clear any existing frames
@@ -113,6 +114,8 @@ class BaseSim:
 
         # Agent status update
         for agent in self.agents:
+            if agent is self.dragging_target:
+                continue
             agent.update()
         # Status retrieval
         self.simulation_time += self.sampling_time
@@ -268,6 +271,25 @@ class BaseSim:
                 elif event.key == pygame.K_r:
                     print("Scenario reset!")
                     self.reset()           
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                click_pos = pygame.Vector2(event.pos)
+                for agent in self.agents:
+                    if (agent.position - click_pos).length() <= 20:
+                        self.dragging_target = agent
+                        break
+                else:
+                    for task in self.tasks:
+                        if not task.completed and (task.position - click_pos).length() <= 20:
+                            self.dragging_target = task
+                            break
+            elif event.type == pygame.MOUSEMOTION and self.dragging_target is not None:
+                self.dragging_target.position = pygame.Vector2(event.pos)
+            elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                if self.dragging_target is not None:
+                    if hasattr(self.dragging_target, 'reset_movement'):
+                        self.dragging_target.reset_movement()
+                    self.dragging_target = None           
+
 
     def record_screen_frame(self):
         # Capture frame for recording
