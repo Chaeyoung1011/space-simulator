@@ -16,15 +16,18 @@ behavior_tree_xml = f"{os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 _BATTERY_DRAIN_PER_PX = 3.0 / 1000.0
 
 class Agent(BaseAgent):
-    def __init__(self, agent_id, position, tasks_info, rotation=0, seed=None):
+    def __init__(self, agent_id, position, tasks_info, rotation=0, seed=None, initial_battery=None):
         super().__init__(agent_id, position, tasks_info, rotation)
         self.work_rate = work_rate
 
         self.task_amount_done = 0.0
 
-        # Battery: random initial value 40~100%, drains 5% per 1000 px
-        rng = random.Random(seed) if seed is not None else random
-        self.battery = rng.uniform(40.0, 90.0)
+        # Battery: use fixed value if provided, otherwise random 40~90%
+        if initial_battery is not None:
+            self.battery = float(initial_battery)
+        else:
+            rng = random.Random(seed) if seed is not None else random
+            self.battery = rng.uniform(40.0, 90.0)
         self._prev_distance = 0.0
 
     def update(self):
