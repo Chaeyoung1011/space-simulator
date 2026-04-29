@@ -52,7 +52,10 @@ class DistributedHungarian:
         previous_assigned_task_id = self.assigned_task.task_id if self.assigned_task is not None else None  # For Debug        
 
         _local_tasks_info = blackboard.get('local_tasks_info', {})
-        messages = self.agent.messages_received
+        
+        my_st_id = getattr(self.agent, 'assigned_super_task_id', None)
+        messages = [m for m in self.agent.messages_received if m and
+                    (my_st_id is None or m.get('assigned_super_task_id') == my_st_id)]
         
         # Handle completed task
         self.assigned_task = _local_tasks_info.get(previous_assigned_task_id)        
@@ -114,7 +117,13 @@ class DistributedHungarian:
                     if aid is None and isinstance(agent, dict):
                         aid = agent.get('agent_id')
                     
-                    if aid is not None:
+                    st_id = getattr(agent, 'assigned_super_task_id', None)
+                    if st_id is None and isinstance(agent, dict):
+                        st_id = agent.get('assigned_super_task_id')
+                    
+                    my_st_id = getattr(self.agent, 'assigned_super_task_id', None)
+                    
+                    if aid is not None and (my_st_id is None or st_id is None or st_id == my_st_id):
                         perceived_ids.add(aid)
         
         if not current_r_ids.issubset(perceived_ids):
@@ -148,7 +157,13 @@ class DistributedHungarian:
                 if aid is None and isinstance(agent, dict):
                     aid = agent.get('agent_id')
                 
-                if aid is not None and aid not in candidates:
+                st_id = getattr(agent, 'assigned_super_task_id', None)
+                if st_id is None and isinstance(agent, dict):
+                    st_id = agent.get('assigned_super_task_id')
+                
+                my_st_id = getattr(self.agent, 'assigned_super_task_id', None)
+                
+                if aid is not None and aid not in candidates and (my_st_id is None or st_id is None or st_id == my_st_id):
                     candidates[aid] = agent
         
         # 2. Link State Graph Reconstruction
@@ -185,13 +200,14 @@ class DistributedHungarian:
         while queue:
             curr = queue.popleft()
             for n in self.global_adjacency.get(curr, set()):
-                if n not in visited:
+                if n not in visited and n in candidates:
                     visited.add(n)
                     if n in self.global_adjacency:
                         queue.append(n)
 
-        # Update R
-        self.R = [candidates[aid] for aid in sorted(visited) if aid in candidates]
+        # Update R (filter out candidates with no position — can happen during message channel swap)
+        self.R = [candidates[aid] for aid in sorted(visited)
+                  if aid in candidates and candidates[aid].get('position') is not None]
         new_R_ids = visited
         
         # Update P
@@ -247,6 +263,7 @@ class DistributedHungarian:
 
         self.agent.message_to_share = {
                                        'agent_id': _agent_id,
+                                       'assigned_super_task_id': getattr(self.agent, 'assigned_super_task_id', None),
                                        'adjacency_graph': graph_to_send, # Send Full Graph
                                        'position': self.agent.position,
                                        'agents_info': self.R, # Send Full Agent Objects (Data Payload)
