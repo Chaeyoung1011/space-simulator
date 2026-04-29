@@ -3,10 +3,8 @@
     <ReactiveSequence>
       <GatherLocalInfo/>
       <AssignSuperTask/>
-      <ReactiveFallback>
-        <AssignTask/>
-        <AssignOverflowTask/>
-      </ReactiveFallback>
+      <RebalanceGroups/>
+      <AssignTask/>
       <ReactiveFallback>
         <IsArrivedAtTarget/>
         <MoveToTarget/>
@@ -18,10 +16,8 @@
   <TreeNodesModel>
     <Action    ID="GatherLocalInfo"/>
     <Action    ID="AssignSuperTask"/>
-    <Action    ID="MoveToSuperTask"/>
-    <Condition ID="IsArrivedAtSuperTask"/>
+    <Action    ID="RebalanceGroups"/>
     <Action    ID="AssignTask"/>
-    <Action    ID="AssignOverflowTask"/>
     <Action    ID="MoveToTarget"/>
     <Action    ID="ExecuteTask"/>
     <Action    ID="Explore"/>
